@@ -104,13 +104,28 @@ step "Extracting"
 tar -xzf "$TMP/$FILE.tar.gz" -C "$TMP"
 [ -f "$TMP/$FILE/$NAME" ] || die "Archive did not contain '$NAME'"
 
+# Quarantine handling: no sudo, the flag lives on files we own.
+step "Clearing quarantine flags (no sudo needed)"
+xattr -dr com.apple.quarantine "$TMP/$FILE" 2>/dev/null || true
+xattr -d  com.apple.quarantine "$TMP/$FILE.tar.gz" 2>/dev/null || true
+ok "Quarantine cleared on downloaded files"
+
 step "Installing into $PREFIX"
 [ -d "$PREFIX" ] || mkdir -p "$PREFIX" || die "Cannot create $PREFIX"
 [ -w "$PREFIX" ] || die "$PREFIX is not writable by $(whoami). Try: ./install.sh --prefix ~/bin"
 cp "$TMP/$FILE/$NAME" "$PREFIX/$NAME"
 chmod 755 "$PREFIX/$NAME"
-# Belt-and-braces: drop the quarantine flag so Gatekeeper never prompts.
+
+# Same again for the installed binary, then verify it really is clean.
 xattr -d com.apple.quarantine "$PREFIX/$NAME" 2>/dev/null || true
+if xattr -p com.apple.quarantine "$PREFIX/$NAME" >/dev/null 2>&1; then
+  xattr -c "$PREFIX/$NAME" 2>/dev/null || true   # fallback: wipe every xattr
+fi
+if xattr -p com.apple.quarantine "$PREFIX/$NAME" >/dev/null 2>&1; then
+  warn "Quarantine flag is still present - run: xattr -d com.apple.quarantine $PREFIX/$NAME"
+else
+  ok "Installed binary is quarantine-free"
+fi
 ok "$PREFIX/$NAME  (v$VERSION, $TARGET)"
 
 add_path() {
