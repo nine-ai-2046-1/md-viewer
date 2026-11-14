@@ -1,0 +1,153 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish, e.g. 0.1.0 (creates or reuses tag v<version>)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  BIN: md-viewer
+
+jobs:
+  prep:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      build: ${{ steps.decide.outputs.build }}
+      publish: ${{ steps.decide.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: ver
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            V="$INPUT_VERSION"
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            V="${GITHUB_REF_NAME#v}"
+          else
+            V=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          fi
+          echo "Resolved version: $V"
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Decide build and publish
+        id: decide
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null 2>&1; then
+            TAG_EXISTS=true
+          else
+            TAG_EXISTS=false
+          fi
+          echo "tag v${VERSION} exists: ${TAG_EXISTS}"
+
+          BUILD=true
+          PUBLISH=true
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            PUBLISH=false
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            if [ "${{ github.ref_type }}" != "tag" ] && [ "${TAG_EXISTS}" = "true" ]; then
+              echo "Tag already exists for v${VERSION} - nothing to build or publish."
+              BUILD=false
+              PUBLISH=false
+            fi
+          fi
+
+          echo "build=${BUILD}" >> "$GITHUB_OUTPUT"
+          echo "publish=${PUBLISH}" >> "$GITHUB_OUTPUT"
+
+  macos:
+    name: macOS ${{ matrix.target }}
+    needs: [prep]
+    if: needs.prep.outputs.build == 'true'
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - aarch64-apple-darwin
+          - x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package
+        env:
+          VER: ${{ needs.prep.outputs.version }}
+        run: |
+          OUT="${BIN}-${VER}-${{ matrix.target }}"
+          mkdir -p "$OUT"
+          cp "target/${{ matrix.target }}/release/${BIN}" "$OUT/"
+          cp README.md LICENSE "$OUT/"
+          tar -czf "${OUT}.tar.gz" -C . "$OUT"
+          shasum -a 256 "${OUT}.tar.gz" > "${OUT}.tar.gz.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BIN }}-${{ matrix.target }}
+          retention-days: 14
+          path: |
+            ${{ env.BIN }}-*.tar.gz
+            ${{ env.BIN }}-*.tar.gz.sha256
+
+  release:
+    name: Publish release
+    needs: [prep, macos]
+    if: needs.prep.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Show files
+        run: ls -lh artifacts
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.prep.outputs.version }}
+          name: v${{ needs.prep.outputs.version }}
+          files: artifacts/*
+          generate_release_notes: true
+          draft: false
