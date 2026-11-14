@@ -15,17 +15,61 @@ A self-contained CLI tool that renders Markdown and YAML files as beautiful HTML
 - **Localhost-only** — binds to `127.0.0.1`; path traversal prevention; security headers
 - Single self-contained binary (~1.5 MB); no runtime dependencies
 
-## Requirements
-
-- Rust 1.70+ (for building from source)
-- macOS or Linux
-
 ## Installation
 
+### macOS — download a prebuilt binary (no clone, no Rust)
+
+| Your Mac | Download |
+|---|---|
+| Apple Silicon (M1/M2/M3/M4) | [`md-viewer-0.1.0-aarch64-apple-darwin.tar.gz`](https://github.com/nine-ai-2046-1/md-viewer/releases/download/v0.1.0/md-viewer-0.1.0-aarch64-apple-darwin.tar.gz) |
+| Intel | [`md-viewer-0.1.0-x86_64-apple-darwin.tar.gz`](https://github.com/nine-ai-2046-1/md-viewer/releases/download/v0.1.0/md-viewer-0.1.0-x86_64-apple-darwin.tar.gz) |
+
+Not sure which one? Run `uname -m`: `arm64` = Apple Silicon, `x86_64` = Intel.
+
+All releases: https://github.com/nine-ai-2046-1/md-viewer/releases
+
 ```bash
-git clone <repo-url>
+# Apple Silicon (swap the filename for Intel)
+curl -L -o md-viewer.tar.gz \
+  https://github.com/nine-ai-2046-1/md-viewer/releases/download/v0.1.0/md-viewer-0.1.0-aarch64-apple-darwin.tar.gz
+
+tar -xzf md-viewer.tar.gz
+cd md-viewer-0.1.0-aarch64-apple-darwin
+./md-viewer --help
+```
+
+Each release also ships a `.sha256` sidecar so you can verify the archive:
+
+```bash
+shasum -a 256 -c md-viewer-0.1.0-aarch64-apple-darwin.tar.gz.sha256
+```
+
+**If macOS refuses to open it:** the binary is unsigned, so browser-downloaded copies get a quarantine flag. Clear it (no admin rights needed):
+
+```bash
+xattr -d com.apple.quarantine ./md-viewer
+```
+
+Downloading with `curl` avoids the flag entirely. Building from source also produces an unflagged binary.
+
+Optional — put it on your `PATH`:
+
+```bash
+mkdir -p ~/bin && mv md-viewer ~/bin/
+```
+
+### Linux / Windows
+
+No prebuilt binaries are published for these platforms — build from source (see below), or open an issue if you want them.
+
+### Build from source (any platform)
+
+Requirements: Rust 1.70+.
+
+```bash
+git clone https://github.com/nine-ai-2046-1/md-viewer
 cd md-viewer
-cargo build --release
+cargo build --release --locked
 # Binary: target/release/md-viewer
 ```
 
